@@ -122,5 +122,4 @@ For questions, feedback, or support, please contact:
 
 If you find NetSnoop useful, please consider starring the repository on GitHub!
 
-[![GitHub Stars](https://img.shields.io/github/stars/Dynamo2k1/NetSnoop.svg?style=social)](https://github.com/YourUsername/NetSnoop)
-``
+[![GitHub Stars](https://img.shields.io/github/stars/Dynamo2k1/NetSnoop.svg?style=social)](https://github.com/Dynamo2k1/NetSnoop)
