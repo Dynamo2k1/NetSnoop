@@ -7,23 +7,29 @@ import argparse
 import time
 import sys
 import fcntl
-import os
+import osgi
 import threading
+import json
+from datetime import datetime
 
-# ANSI escape sequences for colors (feel free to tweak)
-RED = "\033[91m"
-GREEN = "\033[92m"
-YELLOW = "\033[93m"
-BLUE = "\033[94m"
+# Use Colorama for cross-platform color support
+import colorama
+colorama.init(autoreset=True)
+
+# ANSI escape sequences (Colorama provides cross-platform support)
+RED     = "\033[91m"
+GREEN   = "\033[92m"
+YELLOW  = "\033[93m"
+BLUE    = "\033[94m"
 MAGENTA = "\033[95m"
-CYAN = "\033[96m"
-BRIGHT = "\033[1m"
-RESET = "\033[0m"
+CYAN    = "\033[96m"
+BRIGHT  = "\033[1m"
+RESET   = "\033[0m"
 
 # Constants for ioctl to set promiscuous mode
 SIOCGIFFLAGS = 0x8913
 SIOCSIFFLAGS = 0x8914
-IFF_PROMISC = 0x100
+IFF_PROMISC  = 0x100
 
 # Global stats dictionary
 stats = {
@@ -60,7 +66,7 @@ Capturing live traffic in style!
 
 def set_promiscuous_mode(sock, interface):
     """
-    Enable promiscuous mode on the given interface using ioctl calls.
+    Enable promiscuous mode on the given interface.
     """
     ifreq = struct.pack('16sH', interface.encode('utf-8'), 0)
     try:
@@ -84,10 +90,10 @@ def format_mac(raw_mac):
 def hex_dump(data, length=16):
     result = []
     for i in range(0, len(data), length):
-        s = data[i:i + length]
+        s = data[i:i+length]
         hexa = " ".join(f"{b:02x}" for b in s)
         text = "".join(chr(b) if 32 <= b < 127 else "." for b in s)
-        result.append(f"{i:04x}   {hexa:<{length * 3}}   {text}")
+        result.append(f"{i:04x}   {hexa:<{length*3}}   {text}")
     return "\n".join(result)
 
 
@@ -234,49 +240,55 @@ def parse_arp_header(data):
     }
 
 
-def print_packet_info(eth, payload_info, protocol_name="", dump_data=False, raw_data=None):
-    timestamp = time.strftime("%H:%M:%S", time.localtime())
-    print(f"{CYAN}[{timestamp}]{RESET}")
-    print(f"{YELLOW}Ethernet{RESET}: {eth['src_mac']} -> {eth['dest_mac']}  (Type: 0x{eth['proto']:04x})")
-
-    if protocol_name == "IPv4":
-        ip = payload_info
-        print(
-            f"{GREEN}IPv4{RESET}: {ip['src_ip']} -> {ip['dst_ip']}, Protocol: {ip.get('protocol_name', '')}, TTL: {ip['ttl']}")
-        if "transport_info" in ip:
-            print(f"{BLUE}Transport{RESET}: {ip['transport_info']}")
-        if "http" in ip:
-            print(f"{MAGENTA}HTTP Data{RESET}:\n{ip['http']}")
-    elif protocol_name == "ARP":
-        arp = payload_info
-        print(
-            f"{GREEN}ARP{RESET}: {arp['sender_mac']} ({arp['sender_ip']}) => {arp['target_mac']} ({arp['target_ip']}), Opcode: {arp['opcode']}")
-    elif protocol_name == "IPv6":
-        ipv6 = payload_info
-        print(
-            f"{GREEN}IPv6{RESET}: {ipv6['src_ip']} -> {ipv6['dst_ip']}, Next Header: {ipv6['next_header']}, Hop Limit: {ipv6['hop_limit']}")
-    elif protocol_name in ("TCP", "UDP", "ICMP", "DNS", "DHCP"):
-        print(f"{GREEN}{protocol_name}{RESET}: {payload_info}")
-    elif protocol_name == "VLAN":
-        print(f"{GREEN}VLAN{RESET}: {payload_info}")
+def print_packet_info(eth, payload_info, protocol_name="", dump_data=False, raw_data=None, output_format="pretty"):
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    if output_format == "json":
+        # Create a JSON object and print it
+        packet_summary = {
+            "timestamp": timestamp,
+            "ethernet": eth,
+            "protocol": protocol_name,
+            "payload": payload_info
+        }
+        print(json.dumps(packet_summary, indent=2))
     else:
-        print(f"{GREEN}{protocol_name}{RESET}: {payload_info}")
-    if dump_data and raw_data:
-        print(f"{MAGENTA}Hex Dump:{RESET}")
-        print(hex_dump(raw_data))
-    print("-" * 80)
+        print(f"{CYAN}[{timestamp}]{RESET}")
+        print(f"{YELLOW}Ethernet{RESET}: {eth['src_mac']} -> {eth['dest_mac']}  (Type: 0x{eth['proto']:04x})")
+        if protocol_name == "IPv4":
+            ip = payload_info
+            print(f"{GREEN}IPv4{RESET}: {ip['src_ip']} -> {ip['dst_ip']}, Protocol: {ip.get('protocol_name', '')}, TTL: {ip['ttl']}")
+            if "transport_info" in ip:
+                print(f"{BLUE}Transport{RESET}: {ip['transport_info']}")
+            if "http" in ip:
+                print(f"{MAGENTA}HTTP Data{RESET}:\n{ip['http']}")
+        elif protocol_name == "ARP":
+            arp = payload_info
+            print(f"{GREEN}ARP{RESET}: {arp['sender_mac']} ({arp['sender_ip']}) => {arp['target_mac']} ({arp['target_ip']}), Opcode: {arp['opcode']}")
+        elif protocol_name == "IPv6":
+            ipv6 = payload_info
+            print(f"{GREEN}IPv6{RESET}: {ipv6['src_ip']} -> {ipv6['dst_ip']}, Next Header: {ipv6['next_header']}, Hop Limit: {ipv6['hop_limit']}")
+        elif protocol_name in ("TCP", "UDP", "ICMP", "DNS", "DHCP"):
+            print(f"{GREEN}{protocol_name}{RESET}: {payload_info}")
+        elif protocol_name == "VLAN":
+            print(f"{GREEN}VLAN{RESET}: {payload_info}")
+        else:
+            print(f"{GREEN}{protocol_name}{RESET}: {payload_info}")
+        if dump_data and raw_data:
+            print(f"{MAGENTA}Hex Dump:{RESET}")
+            print(hex_dump(raw_data))
+        print("-" * 80)
 
 
 def write_pcap_global_header(f):
     # PCAP Global Header (24 bytes)
     global_header = struct.pack("=IHHIIII",
                                 0xa1b2c3d4,  # Magic number
-                                2,  # Major version
-                                4,  # Minor version
-                                0,  # GMT correction
-                                0,  # Accuracy of timestamps
-                                65535,  # Max length
-                                1)  # Data link type (Ethernet)
+                                2,           # Major version
+                                4,           # Minor version
+                                0,           # GMT correction
+                                0,           # Accuracy of timestamps
+                                65535,       # Max length
+                                1)           # Data link type (Ethernet)
     f.write(global_header)
 
 
@@ -312,16 +324,25 @@ def main():
     print_banner()
     parser = argparse.ArgumentParser(
         description="NetSnoop - Ultimate Packet Sniffer",
-        epilog="Run with sudo: sudo python3 NetSnoop.py -i <interface> [-o <output_file>] [--dump] [--stats-interval <seconds>] [--filter <protocol>]"
+        epilog="Run with sudo: sudo python3 NetSnoop.py -i <interface> [-o <output_file>] [--dump] [--stats-interval <seconds>] [--filter <protocol>] [--format <pretty|json>] [--src <ip>] [--dst <ip>]"
     )
     parser.add_argument("-i", "--interface", type=str, default="eth1", help="Interface to sniff (default: eth1)")
     parser.add_argument("-o", "--output", type=str, help="Optional: Save captured packets to a PCAP file")
     parser.add_argument("--dump", action="store_true", help="Display hex dump for each packet")
-    parser.add_argument("--stats-interval", type=int, default=30,
-                        help="Interval in seconds for printing stats (default: 30)")
-    parser.add_argument("--filter", type=str,
-                        help="Filter to display only packets of the specified protocol (e.g. IPv4, ARP, IPv6, TCP, UDP, ICMP, DNS, DHCP, VLAN, HTTP)")
+    parser.add_argument("--stats-interval", type=int, default=30, help="Interval in seconds for printing stats (default: 30)")
+    parser.add_argument("--filter", type=str, help="Filter to display only packets of the specified protocol (e.g. IPv4, ARP, IPv6, TCP, UDP, ICMP, DNS, DHCP, VLAN, HTTP)")
+    parser.add_argument("--format", type=str, choices=["pretty", "json"], default="pretty", help="Output format: pretty (default) or json")
+    parser.add_argument("--src", type=str, help="Filter by source IP address")
+    parser.add_argument("--dst", type=str, help="Filter by destination IP address")
+    parser.add_argument("--log-file", type=str, help="Optional: Log packet summaries (in JSON) to a file")
     args = parser.parse_args()
+
+    log_file = None
+    if args.log_file:
+        try:
+            log_file = open(args.log_file, "a")
+        except Exception as e:
+            sys.exit(f"{RED}[-] Failed to open log file: {e}{RESET}")
 
     try:
         sniffer = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
@@ -361,12 +382,21 @@ def main():
             # Check for VLAN-tagged frames
             if eth_type == 0x8100 and len(raw_data) >= 18:
                 update_stats("VLAN")
-                # VLAN header is 4 bytes; extract and then update eth_type to the encapsulated protocol
+                # VLAN header is 4 bytes; extract and update eth_type to the encapsulated protocol
                 vlan_header = struct.unpack("!HH", raw_data[14:18])
                 vlan_id = vlan_header[0] & 0x0FFF
                 encapsulated_proto = vlan_header[1]
                 vlan_info = {"VLAN_ID": vlan_id, "Encapsulated_Type": f"0x{encapsulated_proto:04x}"}
-                print_packet_info(eth, vlan_info, protocol_name="VLAN", dump_data=args.dump, raw_data=raw_data)
+                # Apply filter if specified
+                if args.filter and args.filter.lower() != "vlan":
+                    continue
+                print_packet_info(eth, vlan_info, protocol_name="VLAN", dump_data=args.dump, raw_data=raw_data, output_format=args.format)
+                if log_file:
+                    log_file.write(json.dumps({
+                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                        "protocol": "VLAN",
+                        "info": vlan_info
+                    }) + "\n")
                 continue
 
             # Process based on EtherType
@@ -381,9 +411,9 @@ def main():
                     ip["protocol_name"] = "TCP"
                     tcp_start = 14 + ip["ihl"]
                     transport_info = parse_tcp_header(raw_data[tcp_start:tcp_start + 20])
-                    # Attempt to extract HTTP cleartext from TCP payload if port 80/8080
+                    # Attempt to extract HTTP cleartext if port 80/8080
                     tcp_payload_start = tcp_start + transport_info["header_length"]
-                    tcp_payload = raw_data[tcp_payload_start: 14 + ip["total_length"]]
+                    tcp_payload = raw_data[tcp_payload_start:14 + ip["total_length"]]
                     try:
                         http_text = tcp_payload.decode("utf-8", errors="ignore")
                         if http_text.startswith("GET") or http_text.startswith("POST") or http_text.startswith("HTTP"):
@@ -410,34 +440,64 @@ def main():
                     transport_info = parse_icmp_header(raw_data[icmp_start:icmp_start + 4])
                 if transport_info is not None:
                     ip["transport_info"] = transport_info
-                # Apply filter if specified
-                if args.filter:
-                    if args.filter.lower() != ip["protocol_name"].lower():
-                        continue
-                print_packet_info(eth, ip, protocol_name="IPv4", dump_data=args.dump, raw_data=raw_data)
+
+                # Apply filter options (protocol, source IP, destination IP)
+                if args.filter and args.filter.lower() != ip["protocol_name"].lower():
+                    continue
+                if args.src and args.src != ip["src_ip"]:
+                    continue
+                if args.dst and args.dst != ip["dst_ip"]:
+                    continue
+
+                print_packet_info(eth, ip, protocol_name="IPv4", dump_data=args.dump, raw_data=raw_data, output_format=args.format)
+                if log_file:
+                    log_file.write(json.dumps({
+                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                        "protocol": ip["protocol_name"],
+                        "info": ip
+                    }) + "\n")
             elif eth_type == 0x0806:  # ARP
                 update_stats("ARP")
                 arp = parse_arp_header(raw_data[14:42])
                 if args.filter and args.filter.lower() != "arp":
                     continue
-                print_packet_info(eth, arp, protocol_name="ARP", dump_data=args.dump, raw_data=raw_data)
+                print_packet_info(eth, arp, protocol_name="ARP", dump_data=args.dump, raw_data=raw_data, output_format=args.format)
+                if log_file:
+                    log_file.write(json.dumps({
+                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                        "protocol": "ARP",
+                        "info": arp
+                    }) + "\n")
             elif eth_type == 0x86DD:  # IPv6
                 update_stats("IPv6")
                 ipv6 = parse_ipv6_header(raw_data[14:54])
                 if args.filter and args.filter.lower() != "ipv6":
                     continue
-                print_packet_info(eth, ipv6, protocol_name="IPv6", dump_data=args.dump, raw_data=raw_data)
+                print_packet_info(eth, ipv6, protocol_name="IPv6", dump_data=args.dump, raw_data=raw_data, output_format=args.format)
+                if log_file:
+                    log_file.write(json.dumps({
+                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                        "protocol": "IPv6",
+                        "info": ipv6
+                    }) + "\n")
             else:
                 update_stats("Other")
                 if args.filter and args.filter.lower() != "other":
                     continue
-                print_packet_info(eth, {"data": raw_data[14:]}, protocol_name=f"Other (0x{eth_type:04x})",
-                                  dump_data=args.dump, raw_data=raw_data)
+                print_packet_info(eth, {"data": raw_data[14:]}, protocol_name=f"Other (0x{eth_type:04x})", dump_data=args.dump, raw_data=raw_data, output_format=args.format)
+                if log_file:
+                    log_file.write(json.dumps({
+                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                        "protocol": "Other",
+                        "info": {"data": raw_data[14:].hex()}
+                    }) + "\n")
     except KeyboardInterrupt:
         print(f"\n{YELLOW}Stopping packet capture...{RESET}")
     finally:
         if pcap_file:
             pcap_file.close()
+        if log_file:
+            log_file.close()
         with stats_lock:
             print(f"\n{BRIGHT}{CYAN}[Final Stats] Packet Counts:{RESET}")
             for proto, count in stats.items():
