@@ -11,8 +11,6 @@ import osgi
 import threading
 import json
 from datetime import datetime
-
-# Use Colorama for cross-platform color support
 import colorama
 colorama.init(autoreset=True)
 
