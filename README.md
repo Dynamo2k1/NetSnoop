@@ -32,7 +32,7 @@
 Clone the repository:
 
 ```bash
-git clone https://github.com/YourUsername/NetSnoop.git
+git clone https://github.com/Dynamo2k1/NetSnoop.git
 cd NetSnoop
 ```
 
