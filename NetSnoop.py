@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""
-NetSnoop - Ultimate Packet Sniffer
------------------------------------
-NetSnoop captures Ethernet frames on a given interface, enables promiscuous mode,
-and decodes a variety of protocols (IPv4, ARP, IPv6, TCP, UDP, ICMP, DNS, DHCP, VLAN)
-with colorful, timestamped output. It can also display a hex dump for each packet,
-save captured packets to a PCAP file for later analysis (e.g. in Wireshark), and
-maintain real-time protocol statistics.
-"""
 
 import socket
 import struct
